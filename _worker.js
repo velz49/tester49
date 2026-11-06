@@ -85,17 +85,23 @@ async function handleAuth(request, env) {
   }
   if (record.banned) return jsonResponse({ error: "banned" }, 403);
 
-  // Rate limit: max 1 pedido cada 2 segundos por HWID
-  const rl = await env.VELZAR_DB.get("rl:" + hwid);
-  if (rl) return jsonResponse({ error: "rate_limited" }, 429);
-  await env.VELZAR_DB.put("rl:" + hwid, "1", { expirationTtl: 2 });
+  // Rate limit: max 1 pedido cada 2 segundos por HWID.
+  // Cloudflare KV no permite expirationTtl menor a 60s, asi que
+  // controlamos el tiempo a mano con una marca de tiempo guardada.
+  const now = Date.now();
+  const rlRaw = await env.VELZAR_DB.get("rl:" + hwid, { type: "json" });
+  if (rlRaw && now - rlRaw.last < 2000) {
+    return jsonResponse({ error: "rate_limited" }, 429);
+  }
+  await env.VELZAR_DB.put("rl:" + hwid, JSON.stringify({ last: now }), { expirationTtl: 60 });
 
-  // Token de un solo uso, vence en 20 segundos
+  // Token de un solo uso, vence en 20 segundos (chequeado a mano en /api/payload,
+  // el expirationTtl de 60s es solo limpieza de KV, no el vencimiento real).
   const token = randomId(24);
   await env.VELZAR_DB.put(
     "tok:" + token,
-    JSON.stringify({ script, hwid, used: false }),
-    { expirationTtl: 20 }
+    JSON.stringify({ script, hwid, used: false, createdAt: now }),
+    { expirationTtl: 60 }
   );
 
   return jsonResponse({ token });
@@ -112,6 +118,9 @@ async function handlePayload(request, env) {
   await env.VELZAR_DB.delete("tok:" + token); // un solo uso, se borra ya
 
   const data = JSON.parse(raw);
+  if (Date.now() - data.createdAt > 20000) {
+    return jsonResponse({ error: "token_expired" }, 401);
+  }
   const kvId = PROTECTED_SCRIPTS[data.script];
   const sourceCode = await env.VELZAR_DB.get(kvId);
   if (!sourceCode) return jsonResponse({ error: "script_not_configured" }, 404);
