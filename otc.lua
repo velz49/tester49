@@ -4,7 +4,7 @@
 -- lo descifra en memoria y lo ejecuta. No pide key al usuario.
 -- ============================================================
 
-local BASE_URL = "https://boytest49.pages.dev/"
+local BASE_URL = "https://boytest49.pages.dev"
 local SCRIPT_ID = "otc" -- cambia esto por script: "sexyboy-esp", "blockcopysb", "test"
 
 local function httpRequest(opts)
